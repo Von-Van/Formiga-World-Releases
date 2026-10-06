@@ -1,0 +1,38 @@
+name: Ship
+
+# Makes the drafts Build made public, Desktop first, then points the website's downloads at
+# them. It checks every draft has all its files before making any of them public.
+
+on:
+  workflow_dispatch:
+    inputs:
+      desktop:
+        description: "Formiga Desktop version, e.g. 0.67.2 (as given to Build)"
+        required: true
+      hill:
+        description: "Formiga Hill version, e.g. 0.1.2 (as given to Build)"
+        required: false
+      home:
+        description: "Formiga Home version, e.g. 0.1.2 (as given to Build)"
+        required: false
+
+# One release at a time, and a second press waits rather than cancelling the first.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  ship:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - run: scripts/release.sh ship "$DESKTOP_VERSION" "$HILL_VERSION" "$HOME_VERSION"
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          DESKTOP_VERSION: ${{ inputs.desktop }}
+          HILL_VERSION: ${{ inputs.hill }}
+          HOME_VERSION: ${{ inputs.home }}

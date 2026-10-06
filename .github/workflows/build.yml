@@ -1,0 +1,40 @@
+name: Build
+
+# Tags Formiga Desktop and its expansions as hidden draft releases, Desktop first, and waits until
+# every draft has all its files. Nobody sees a draft until Ship makes it public.
+
+on:
+  workflow_dispatch:
+    inputs:
+      desktop:
+        description: "Formiga Desktop version, e.g. 0.67.2 (one already released is reused)"
+        required: true
+      hill:
+        description: "Formiga Hill version, e.g. 0.1.2 (blank leaves Hill out)"
+        required: false
+      home:
+        description: "Formiga Home version, e.g. 0.1.2 (blank leaves Home out)"
+        required: false
+
+# One release at a time, and a second press waits rather than cancelling the first.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      # The expansions' version scripts refresh Cargo.lock for Desktop's new tag.
+      - uses: dtolnay/rust-toolchain@1.97.1
+      - run: scripts/release.sh build "$DESKTOP_VERSION" "$HILL_VERSION" "$HOME_VERSION"
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          DESKTOP_VERSION: ${{ inputs.desktop }}
+          HILL_VERSION: ${{ inputs.hill }}
+          HOME_VERSION: ${{ inputs.home }}
