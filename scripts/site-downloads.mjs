@@ -18,6 +18,7 @@ export function offer(config, versions) {
     const next = out.indexOf("id: \"", start + 1);
     if (open < 0 || (next >= 0 && open > next)) throw new Error(`"${id}" has no fallback`);
     const close = out.indexOf("\n      },", open);
+    if (close < 0 || (next >= 0 && close > next)) throw new Error(`"${id}"'s fallback has no end the site's layout leads to expect`);
     const block = out.slice(open, close);
     const old = block.match(/tag: "v(\d+\.\d+\.\d+)"/);
     if (!old) throw new Error(`"${id}" names no fallback tag`);

@@ -37,3 +37,9 @@ test("an unknown component or a malformed version is refused", () => {
   assert.throws(() => offer(config, { farm: "0.1.0" }), /no component "farm"/);
   assert.throws(() => offer(config, { desktop: "v0.67.2" }), /not a version/);
 });
+
+test("a fallback whose end cannot be found is refused, not rewritten past", () => {
+  const reshaped = config.replace(/(windows: "Formiga-0\.67\.1-windows-x64\.msi",\n {8}\},)\n {6}\},/, "$1 },");
+  assert.notEqual(reshaped, config);
+  assert.throws(() => offer(reshaped, { desktop: "0.67.2" }), /no end/);
+});

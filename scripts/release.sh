@@ -66,7 +66,8 @@ tag_exists() {
 
 # The release for a tag, drafts included, which GitHub's lookup by tag leaves out.
 release_json() {
-  gh api "repos/$owner/$1/releases?per_page=30" --jq "[.[] | select(.tag_name == \"$2\")][0] // empty"
+  gh api --paginate "repos/$owner/$1/releases?per_page=100" --jq ".[] | select(.tag_name == \"$2\")" |
+    jq -sc '.[0] // empty'
 }
 
 # Prints "draft" or "public" for a release, or nothing when there is none.
