@@ -179,8 +179,9 @@ ship_site() {
 
 command="${1:-}"
 desktop_version="${2:-}"
-[[ "$command" =~ ^(build|ship)$ ]] && [ -n "$desktop_version" ] ||
+if ! [[ "$command" =~ ^(build|ship)$ ]] || [ -z "$desktop_version" ]; then
   fail "usage: $(basename "$0") build|ship <desktop> [<hill>] [<home>]"
+fi
 versions=("${3:-}" "${4:-}")
 check_version "$desktop_version"
 for v in "${versions[@]}"; do [ -z "$v" ] || check_version "$v"; done
