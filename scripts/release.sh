@@ -49,19 +49,22 @@ check_version() {
 # Commits are made as the person whose key this is, so they read as theirs on GitHub.
 git_identity() {
   local login id
-  login="$(gh api user --jq .login)"
-  id="$(gh api user --jq .id)"
+  read -r login id < <(gh api user --jq '"\(.login) \(.id)"')
   git -C "$1" config user.name "$login"
   git -C "$1" config user.email "$id+$login@users.noreply.github.com"
 }
 
+remote() {
+  printf 'https://x-access-token:%s@github.com/%s/%s.git' "$GH_TOKEN" "$owner" "$1"
+}
+
 clone() {
-  git clone --quiet "https://x-access-token:$GH_TOKEN@github.com/$owner/$1.git" "$work/$1"
+  git clone --quiet "$(remote "$1")" "$work/$1"
   git_identity "$work/$1"
 }
 
 tag_exists() {
-  [ -n "$(git ls-remote --tags "https://x-access-token:$GH_TOKEN@github.com/$owner/$1.git" "refs/tags/$2")" ]
+  [ -n "$(git ls-remote --tags "$(remote "$1")" "refs/tags/$2")" ]
 }
 
 # The release for a tag, drafts included, which GitHub's lookup by tag leaves out.
@@ -70,22 +73,22 @@ release_json() {
     jq -sc '.[0] // empty'
 }
 
-# Prints "draft" or "public" for a release, or nothing when there is none.
-release_state() {
-  release_json "$1" "$2" | jq -r 'if .draft then "draft" else "public" end'
+# Prints "draft" or "public" for a release's JSON, or nothing when there is none.
+state_of() {
+  jq -r 'if .draft then "draft" else "public" end' <<<"$1"
 }
 
-# A release is whole when it has every file, each named for this app and version.
+# A release, given its JSON, is whole when it has every file, each named for this app and version.
 check_files() {
-  local repo="$1" tag="$2" prefix="$3" count
-  count="$(release_json "$repo" "$tag" | jq -r '.assets[].name' | grep -c "^$prefix-${tag#v}-" || true)"
+  local repo="$1" tag="$2" prefix="$3" json="$4" count
+  count="$(jq -r '.assets[].name' <<<"$json" | grep -c "^$prefix-${tag#v}-" || true)"
   [ "$count" -eq "$files_per_release" ] ||
     fail "$repo $tag has $count of its $files_per_release files. Rerun the failed part of its release run, then run this again."
 }
 
 # Waits for the release run a tag started, then checks the draft it made.
 wait_for_release() {
-  local repo="$1" tag="$2" prefix="$3" run="" tries=0
+  local repo="$1" tag="$2" prefix="$3" run="" tries=0 json
   say "Waiting for $repo's release run for $tag."
   while [ -z "$run" ]; do
     run="$(gh run list -R "$owner/$repo" --workflow release.yml --event push --limit 20 \
@@ -98,8 +101,9 @@ wait_for_release() {
   done
   gh run watch "$run" -R "$owner/$repo" --exit-status --interval 30 >/dev/null ||
     fail "$repo's release run for $tag failed: https://github.com/$owner/$repo/actions/runs/$run. Rerun its failed jobs once the cause is fixed, then run this again."
-  [ "$(release_state "$repo" "$tag")" = draft ] || fail "$repo $tag was not published as a draft."
-  check_files "$repo" "$tag" "$prefix"
+  json="$(release_json "$repo" "$tag")"
+  [ "$(state_of "$json")" = draft ] || fail "$repo $tag was not published as a draft."
+  check_files "$repo" "$tag" "$prefix" "$json"
   say "$repo $tag is a draft with all its files."
 }
 
@@ -110,10 +114,11 @@ tag_release() {
 }
 
 build_desktop() {
-  local version="$1" tag="v$1" dir="$work/$desktop" subject state
-  state="$(release_state "$desktop" "$tag")"
+  local version="$1" tag="v$1" dir="$work/$desktop" subject json state
+  json="$(release_json "$desktop" "$tag")"
+  state="$(state_of "$json")"
   if [ -n "$state" ]; then
-    check_files "$desktop" "$tag" Formiga
+    check_files "$desktop" "$tag" Formiga "$json"
     say "$desktop $tag is already a $state release; using it."
     return
   fi
@@ -133,10 +138,11 @@ build_desktop() {
 }
 
 build_expansion() {
-  local repo="$1" prefix="$2" version="$3" desktop_tag="$4" tag="v$3" dir="$work/$1" subject state
-  state="$(release_state "$repo" "$tag")"
+  local repo="$1" prefix="$2" version="$3" desktop_tag="$4" tag="v$3" dir="$work/$1" subject json state
+  json="$(release_json "$repo" "$tag")"
+  state="$(state_of "$json")"
   if [ -n "$state" ]; then
-    check_files "$repo" "$tag" "$prefix"
+    check_files "$repo" "$tag" "$prefix" "$json"
     say "$repo $tag is already a $state release; using it."
     return
   fi
@@ -188,12 +194,17 @@ check_version "$desktop_version"
 for v in "${versions[@]}"; do [ -z "$v" ] || check_version "$v"; done
 : "${GH_TOKEN:?GH_TOKEN must be set}"
 
+# The expansions given a version: repository, download name and version.
+chosen=()
+for i in "${!expansions[@]}"; do
+  [ -z "${versions[$i]}" ] || chosen+=("${expansions[$i]} ${versions[$i]}")
+done
+
 if [ "$command" = build ]; then
   build_desktop "$desktop_version"
-  for i in "${!expansions[@]}"; do
-    [ -n "${versions[$i]}" ] || continue
-    read -r repo prefix <<<"${expansions[$i]}"
-    build_expansion "$repo" "$prefix" "${versions[$i]}" "v$desktop_version"
+  for entry in "${chosen[@]}"; do
+    read -r repo prefix version <<<"$entry"
+    build_expansion "$repo" "$prefix" "$version" "v$desktop_version"
   done
   say "Every draft is ready to try. Run ship with the same versions to make them public."
   exit 0
@@ -202,19 +213,22 @@ fi
 # Ship: check every draft is whole before making any of them public, so a half-built set never
 # goes out.
 releases=("$desktop Formiga v$desktop_version")
-for i in "${!expansions[@]}"; do
-  [ -n "${versions[$i]}" ] || continue
-  read -r repo prefix <<<"${expansions[$i]}"
-  releases+=("$repo $prefix v${versions[$i]}")
+for entry in "${chosen[@]}"; do
+  read -r repo prefix version <<<"$entry"
+  releases+=("$repo $prefix v$version")
 done
+states=()
 for entry in "${releases[@]}"; do
   read -r repo prefix tag <<<"$entry"
-  [ -n "$(release_state "$repo" "$tag")" ] || fail "$repo has no $tag release. Run build first."
-  check_files "$repo" "$tag" "$prefix"
+  json="$(release_json "$repo" "$tag")"
+  state="$(state_of "$json")"
+  [ -n "$state" ] || fail "$repo has no $tag release. Run build first."
+  states+=("$state")
+  check_files "$repo" "$tag" "$prefix" "$json"
 done
-for entry in "${releases[@]}"; do
-  read -r repo prefix tag <<<"$entry"
-  if [ "$(release_state "$repo" "$tag")" = draft ]; then
+for i in "${!releases[@]}"; do
+  read -r repo prefix tag <<<"${releases[$i]}"
+  if [ "${states[$i]}" = draft ]; then
     gh release edit "$tag" -R "$owner/$repo" --draft=false --latest >/dev/null
     say "$repo $tag is public."
   else
