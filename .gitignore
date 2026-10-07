@@ -1,4 +1,2 @@
-# Notes for Claude Code and design documents are kept locally, never in git.
+# Notes for Claude Code are kept locally, never in git.
 /CLAUDE.md
-/docs/DESIGN.md
-/docs/DESKTOP_ADOPTION.md
