@@ -26,10 +26,10 @@ window.FORMIGA = {
         windows: "windows-x64\\.msi$",
       },
       fallback: {
-        tag: "v0.67.1",
+        tag: "v0.67.3",
         files: {
-          mac: "Formiga-0.67.1-macOS-universal.dmg",
-          windows: "Formiga-0.67.1-windows-x64.msi",
+          mac: "Formiga-0.67.3-macOS-universal.dmg",
+          windows: "Formiga-0.67.3-windows-x64.msi",
         },
       },
       size: { mac: "macOS 14 or later · Intel and Apple silicon", windows: "Windows 10 or 11 · 64-bit Intel or AMD" },
@@ -46,10 +46,10 @@ window.FORMIGA = {
         windows: "windows.*\\.msi$",
       },
       fallback: {
-        tag: "v0.1.1",
+        tag: "v0.67.3",
         files: {
-          mac: "Formiga-Hill-0.1.1-macOS-universal.dmg",
-          windows: "Formiga-Hill-0.1.1-windows-x64.msi",
+          mac: "Formiga-Hill-0.67.3-macOS-universal.dmg",
+          windows: "Formiga-Hill-0.67.3-windows-x64.msi",
         },
       },
       size: { mac: "macOS 14 or later · Intel and Apple silicon", windows: "Windows 10 or 11 · 64-bit Intel or AMD" },
@@ -66,10 +66,10 @@ window.FORMIGA = {
         windows: "windows.*\\.msi$",
       },
       fallback: {
-        tag: "v0.1.1",
+        tag: "v0.67.3",
         files: {
-          mac: "Formiga-Home-0.1.1-macOS-universal.dmg",
-          windows: "Formiga-Home-0.1.1-windows-x64.msi",
+          mac: "Formiga-Home-0.67.3-macOS-universal.dmg",
+          windows: "Formiga-Home-0.67.3-windows-x64.msi",
         },
       },
       size: { mac: "macOS 14 or later · Intel and Apple silicon", windows: "Windows 10 or 11 · 64-bit Intel or AMD" },
