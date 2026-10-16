@@ -15,14 +15,19 @@ on:
       home:
         description: "Formiga Home version, e.g. 0.1.2 (blank leaves Home out)"
         required: false
+      battle:
+        description: "Formiga Battle version, e.g. 0.67.8 (blank leaves Battle out)"
+        required: false
 
 # One release at a time, and a second press waits rather than cancelling the first.
 concurrency:
   group: release
   cancel-in-progress: false
 
+# This repository's own token starts Battle's build (battle.yml) and reads its draft here.
 permissions:
-  contents: read
+  contents: write
+  actions: write
 
 jobs:
   build:
@@ -32,9 +37,11 @@ jobs:
       - uses: actions/checkout@v4
       # The expansions' version scripts refresh Cargo.lock for Desktop's new tag.
       - uses: dtolnay/rust-toolchain@1.97.1
-      - run: scripts/release.sh build "$DESKTOP_VERSION" "$HILL_VERSION" "$HOME_VERSION"
+      - run: scripts/release.sh build "$DESKTOP_VERSION" "$HILL_VERSION" "$HOME_VERSION" "$BATTLE_VERSION"
         env:
           GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          RELEASES_TOKEN: ${{ github.token }}
           DESKTOP_VERSION: ${{ inputs.desktop }}
           HILL_VERSION: ${{ inputs.hill }}
           HOME_VERSION: ${{ inputs.home }}
+          BATTLE_VERSION: ${{ inputs.battle }}

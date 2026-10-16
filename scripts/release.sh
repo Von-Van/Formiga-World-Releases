@@ -2,21 +2,26 @@
 # Builds and ships Formiga Desktop and its expansions together, in the order they depend on each
 # other: Desktop first, then each expansion on Desktop's new tag, then the website.
 #
-#   scripts/release.sh build <desktop> [<hill>] [<home>]
+#   scripts/release.sh build <desktop> [<hill>] [<home>] [<battle>]
 #     Tags each app as a hidden draft release and waits for every draft to have all its files.
 #     Desktop's main must already be its release commit (scripts/set-version.sh and its notes, as
 #     docs/BUILD.md describes); a Desktop version that is already tagged is reused, so the
 #     expansions can be released on their own. Each expansion's CHANGELOG.md must already have the
 #     new version's section; this moves its version and Desktop tag, commits that to its main, and
-#     tags it.
+#     tags it. Formiga Battle goes through the same steps, but its repository runs no Actions, so
+#     this repository's battle.yml builds it from its tag and keeps its downloads here, as the
+#     release battle-v<battle>.
 #
-#   scripts/release.sh ship <desktop> [<hill>] [<home>]
+#   scripts/release.sh ship <desktop> [<hill>] [<home>] [<battle>]
 #     Makes those drafts public in the same order, then points the website's downloads at them,
-#     taking in the website's release/v<desktop> branch first when there is one.
+#     taking in the website's release/v<desktop> branch first when there is one. For Battle it also
+#     gives the website's friend-match relay the digests of the released programs, so only those
+#     copies of that version can play each other.
 #
 # Versions are written without the v, e.g. 0.67.2. A blank version skips that expansion. Running
-# either command again picks up where an interrupted run stopped. Needs gh, jq, git and cargo, and
-# GH_TOKEN with read and write access to the repositories below.
+# either command again picks up where an interrupted run stopped. Needs gh, jq, git, cargo, node and
+# unzip, GH_TOKEN with read and write access to the repositories below, and RELEASES_TOKEN for this
+# repository itself (its workflows' own token), which starts Battle's build and keeps its releases.
 
 set -euo pipefail
 
@@ -29,6 +34,9 @@ expansions=(
   "Formiga-Hill Formiga-Hill"
   "Formiga-Home Formiga-Home"
 )
+# Formiga Battle's repository, and this one, which builds it and keeps its downloads.
+battle=Formiga-Battle
+releases_repo=Formiga-World-Releases
 # Every release carries a DMG, an MSI and two portable ZIPs, each with its .sha256.
 files_per_release=8
 
@@ -63,13 +71,24 @@ clone() {
   git_identity "$work/$1"
 }
 
+# gh for a repository: this one through its own token, any other through GH_TOKEN.
+gh_on() {
+  local repo="$1"
+  shift
+  if [ "$repo" = "$releases_repo" ]; then
+    GH_TOKEN="${RELEASES_TOKEN:-$GH_TOKEN}" gh "$@"
+  else
+    gh "$@"
+  fi
+}
+
 tag_exists() {
   [ -n "$(git ls-remote --tags "$(remote "$1")" "refs/tags/$2")" ]
 }
 
 # The release for a tag, drafts included, which GitHub's lookup by tag leaves out.
 release_json() {
-  gh api --paginate "repos/$owner/$1/releases?per_page=100" --jq ".[] | select(.tag_name == \"$2\")" |
+  gh_on "$1" api --paginate "repos/$owner/$1/releases?per_page=100" --jq ".[] | select(.tag_name == \"$2\")" |
     jq -sc '.[0] // empty'
 }
 
@@ -81,7 +100,7 @@ state_of() {
 # A release, given its JSON, is whole when it has every file, each named for this app and version.
 check_files() {
   local repo="$1" tag="$2" prefix="$3" json="$4" count
-  count="$(jq -r '.assets[].name' <<<"$json" | grep -c "^$prefix-${tag#v}-" || true)"
+  count="$(jq -r '.assets[].name' <<<"$json" | grep -c "^$prefix-${tag##*v}-" || true)"
   [ "$count" -eq "$files_per_release" ] ||
     fail "$repo $tag has $count of its $files_per_release files. Rerun the failed part of its release run, then run this again."
 }
@@ -161,10 +180,84 @@ build_expansion() {
   wait_for_release "$repo" "$tag" "$prefix"
 }
 
+# Battle's build for a version: the run already going for it, or a new one, waited for.
+battle_runs() {
+  gh_on "$releases_repo" run list -R "$owner/$releases_repo" --workflow battle.yml --limit 20 \
+    --json databaseId,displayTitle,status \
+    --jq ".[] | select(.displayTitle == \"Battle $1\" and ($2)) | .databaseId"
+}
+
+run_battle_build() {
+  local version="$1" run before tries=0
+  run="$(battle_runs "$version" '.status != "completed"' | head -n 1)"
+  if [ -z "$run" ]; then
+    before="$(battle_runs "$version" true)"
+    gh_on "$releases_repo" workflow run battle.yml -R "$owner/$releases_repo" -f "version=$version"
+    while [ -z "$run" ]; do
+      tries=$((tries + 1))
+      [ "$tries" -le 30 ] || fail "Battle's build for $version never started."
+      sleep 10
+      run="$(battle_runs "$version" true | grep -vxF -e "${before:-none}" | head -n 1 || true)"
+    done
+  fi
+  say "Waiting for Battle's build for $version."
+  gh_on "$releases_repo" run watch "$run" -R "$owner/$releases_repo" --exit-status --interval 30 >/dev/null ||
+    fail "Battle's build for $version failed: https://github.com/$owner/$releases_repo/actions/runs/$run. Rerun its failed jobs once the cause is fixed, then run this again."
+}
+
+# The SHA-256 of each released Battle program, Mac's then Windows', read from the release's own
+# zips: the program inside the app, and the .exe the installer carries too. These are the files
+# Battle digests itself when it enters a friend match.
+battle_digests() {
+  local version="$1" dir="$work/battle-$1"
+  rm -rf "$dir"
+  mkdir -p "$dir"
+  gh_on "$releases_repo" release download "battle-v$version" -R "$owner/$releases_repo" -D "$dir" -p "*.zip"
+  unzip -q "$dir/Formiga-Battle-$version-macOS-universal.zip" -d "$dir/mac"
+  unzip -q "$dir/Formiga-Battle-$version-windows-x64.zip" -d "$dir/windows"
+  for program in "$dir/mac/Formiga Battle.app/Contents/MacOS/Formiga Battle" "$dir/windows/Formiga Battle.exe"; do
+    [ -f "$program" ] || fail "Battle $version's downloads have no ${program#"$dir/"}."
+    shasum -a 256 "$program" | cut -d ' ' -f 1
+  done
+}
+
+build_battle() {
+  local version="$1" desktop_tag="$2" tag="v$1" release="battle-v$1" dir="$work/$battle" subject json state built_on
+  json="$(release_json "$releases_repo" "$release")"
+  state="$(state_of "$json")"
+  if [ -z "$state" ]; then
+    if ! tag_exists "$battle" "$tag"; then
+      clone "$battle"
+      grep -qF "## [$version]" "$dir/CHANGELOG.md" ||
+        fail "$battle's CHANGELOG.md has no section for $version yet. Merge it first."
+      (cd "$dir" && scripts/set-version.sh "$version" "$desktop_tag" && scripts/set-version.sh --check)
+      subject="Take Desktop's $desktop_tag and release $version"
+      if ! git -C "$dir" diff --quiet; then
+        git -C "$dir" commit --quiet -am "$subject"
+        git -C "$dir" push --quiet origin HEAD:main ||
+          fail "Could not push to $battle. Give RELEASE_TOKEN write access to its contents, or run its scripts/set-version.sh $version $desktop_tag, merge that, tag it $tag, and run this again."
+      fi
+      tag_release "$battle" "$tag" "$subject"
+    fi
+    # A tag made by hand must be built on the same Desktop as the rest of the release.
+    built_on="$(gh api -H "Accept: application/vnd.github.raw" "repos/$owner/$battle/contents/Cargo.toml?ref=$tag" |
+      sed -n 's/.*Formiga-Desktop", tag = "\(v[^"]*\)".*/\1/p' | sort -u)"
+    [ "$built_on" = "$desktop_tag" ] ||
+      fail "$battle's $tag is built on Desktop's ${built_on:-unknown tag}, not $desktop_tag."
+    run_battle_build "$version"
+    json="$(release_json "$releases_repo" "$release")"
+    [ "$(state_of "$json")" = draft ] || fail "$battle $version was not published as a draft."
+    state=draft
+  fi
+  check_files "$releases_repo" "$release" Formiga-Battle "$json"
+  say "$battle $version is a $state release with all its files. Its programs' digests:"
+  battle_digests "$version"
+}
+
 # Points the website's fallback downloads at the new releases. The page itself always asks GitHub
 # for the newest public release; the fallback is what it offers when GitHub cannot be reached.
 ship_site() {
-  local desktop_version="$1" hill="$2" home="$3" dir="$work/$site" branch="release/v$1" names
+  local desktop_version="$1" hill="$2" home="$3" battle_version="$4" dir="$work/$site" branch="release/v$1" names digests
   clone "$site"
   if git -C "$dir" ls-remote --exit-code --heads origin "$branch" >/dev/null; then
     git -C "$dir" fetch --quiet origin "$branch"
@@ -172,13 +265,18 @@ ship_site() {
       fail "$site's $branch no longer merges cleanly into main. Bring main into it, then run this again."
   fi
   node "$here/site-downloads.mjs" "$dir/assets/js/config.js" \
-    "desktop=$desktop_version" ${hill:+"hill=$hill"} ${home:+"home=$home"}
+    "desktop=$desktop_version" ${hill:+"hill=$hill"} ${home:+"home=$home"} ${battle_version:+"battle=$battle_version"}
+  if [ -n "$battle_version" ]; then
+    digests="$(battle_digests "$battle_version")"
+    # shellcheck disable=SC2086 # one digest a word
+    node "$here/battle-builds.mjs" "$dir/lib/battle-builds.mjs" "$battle_version" $digests
+  fi
   git -C "$dir" add -A
   if git -C "$dir" diff --cached --quiet; then
     say "$site already offers these releases."
     return
   fi
-  names="Desktop $desktop_version${hill:+, Hill $hill}${home:+, Home $home}"
+  names="Desktop $desktop_version${hill:+, Hill $hill}${home:+, Home $home}${battle_version:+, Battle $battle_version}"
   git -C "$dir" commit --quiet -m "Offer $names"
   git -C "$dir" push --quiet origin HEAD:main
   say "$site now offers $names."
@@ -187,11 +285,12 @@ ship_site() {
 command="${1:-}"
 desktop_version="${2:-}"
 if ! [[ "$command" =~ ^(build|ship)$ ]] || [ -z "$desktop_version" ]; then
-  fail "usage: $(basename "$0") build|ship <desktop> [<hill>] [<home>]"
+  fail "usage: $(basename "$0") build|ship <desktop> [<hill>] [<home>] [<battle>]"
 fi
 versions=("${3:-}" "${4:-}")
+battle_version="${5:-}"
 check_version "$desktop_version"
-for v in "${versions[@]}"; do [ -z "$v" ] || check_version "$v"; done
+for v in "${versions[@]}" "$battle_version"; do [ -z "$v" ] || check_version "$v"; done
 : "${GH_TOKEN:?GH_TOKEN must be set}"
 
 # The expansions given a version: repository, download name and version.
@@ -206,6 +305,7 @@ if [ "$command" = build ]; then
     read -r repo prefix version <<<"$entry"
     build_expansion "$repo" "$prefix" "$version" "v$desktop_version"
   done
+  [ -z "$battle_version" ] || build_battle "$battle_version" "v$desktop_version"
   say "Every draft is ready to try. Run ship with the same versions to make them public."
   exit 0
 fi
@@ -217,6 +317,7 @@ for entry in "${chosen[@]}"; do
   read -r repo prefix version <<<"$entry"
   releases+=("$repo $prefix v$version")
 done
+[ -z "$battle_version" ] || releases+=("$releases_repo Formiga-Battle battle-v$battle_version")
 states=()
 for entry in "${releases[@]}"; do
   read -r repo prefix tag <<<"$entry"
@@ -229,10 +330,10 @@ done
 for i in "${!releases[@]}"; do
   read -r repo prefix tag <<<"${releases[$i]}"
   if [ "${states[$i]}" = draft ]; then
-    gh release edit "$tag" -R "$owner/$repo" --draft=false --latest >/dev/null
+    gh_on "$repo" release edit "$tag" -R "$owner/$repo" --draft=false --latest >/dev/null
     say "$repo $tag is public."
   else
     say "$repo $tag was already public."
   fi
 done
-ship_site "$desktop_version" "${versions[0]}" "${versions[1]}"
+ship_site "$desktop_version" "${versions[0]}" "${versions[1]}" "$battle_version"
