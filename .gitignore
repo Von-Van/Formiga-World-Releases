@@ -1,4 +1,4 @@
-# Notes for Claude Code are kept locally, never in git.
+# Local notes and tool settings, kept out of git.
 /CLAUDE.md
 /AGENTS.md
 /.claude/

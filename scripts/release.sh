@@ -225,25 +225,31 @@ build_battle() {
   local version="$1" desktop_tag="$2" tag="v$1" release="battle-v$1" dir="$work/$battle" subject json state built_on
   json="$(release_json "$releases_repo" "$release")"
   state="$(state_of "$json")"
-  if [ -z "$state" ]; then
-    if ! tag_exists "$battle" "$tag"; then
-      clone "$battle"
-      grep -qF "## [$version]" "$dir/CHANGELOG.md" ||
-        fail "$battle's CHANGELOG.md has no section for $version yet. Merge it first."
-      (cd "$dir" && scripts/set-version.sh "$version" "$desktop_tag" && scripts/set-version.sh --check)
-      subject="Take Desktop's $desktop_tag and release $version"
-      if ! git -C "$dir" diff --quiet; then
-        git -C "$dir" commit --quiet -am "$subject"
-        git -C "$dir" push --quiet origin HEAD:main ||
-          fail "Could not push to $battle. Give RELEASE_TOKEN write access to its contents, or run its scripts/set-version.sh $version $desktop_tag, merge that, tag it $tag, and run this again."
-      fi
-      tag_release "$battle" "$tag" "$subject"
+  # A draft a build left without all its files is built again, which finishes it.
+  if [ "$state" = draft ] &&
+    [ "$(jq -r '.assets[].name' <<<"$json" | grep -c "^Formiga-Battle-$version-" || true)" -ne "$files_per_release" ]; then
+    state=""
+  fi
+  if [ -z "$state" ] && ! tag_exists "$battle" "$tag"; then
+    clone "$battle"
+    grep -qF "## [$version]" "$dir/CHANGELOG.md" ||
+      fail "$battle's CHANGELOG.md has no section for $version yet. Merge it first."
+    (cd "$dir" && scripts/set-version.sh "$version" "$desktop_tag" && scripts/set-version.sh --check)
+    subject="Take Desktop's $desktop_tag and release $version"
+    if ! git -C "$dir" diff --quiet; then
+      git -C "$dir" commit --quiet -am "$subject"
+      git -C "$dir" push --quiet origin HEAD:main ||
+        fail "Could not push to $battle. Give RELEASE_TOKEN write access to its contents, or run its scripts/set-version.sh $version $desktop_tag, merge that, tag it $tag, and run this again."
     fi
-    # A tag made by hand must be built on the same Desktop as the rest of the release.
-    built_on="$(gh api -H "Accept: application/vnd.github.raw" "repos/$owner/$battle/contents/Cargo.toml?ref=$tag" |
-      sed -n 's/.*Formiga-Desktop", tag = "\(v[^"]*\)".*/\1/p' | sort -u)"
-    [ "$built_on" = "$desktop_tag" ] ||
-      fail "$battle's $tag is built on Desktop's ${built_on:-unknown tag}, not $desktop_tag."
+    tag_release "$battle" "$tag" "$subject"
+  fi
+  # A tag made by hand, or a release built from one before, must be built on the same Desktop as
+  # the rest of the release.
+  built_on="$(gh api -H "Accept: application/vnd.github.raw" "repos/$owner/$battle/contents/Cargo.toml?ref=$tag" |
+    sed -n 's/.*Formiga-Desktop", tag = "\(v[^"]*\)".*/\1/p' | sort -u)"
+  [ "$built_on" = "$desktop_tag" ] ||
+    fail "$battle's $tag is built on Desktop's ${built_on:-unknown tag}, not $desktop_tag."
+  if [ -z "$state" ]; then
     run_battle_build "$version"
     json="$(release_json "$releases_repo" "$release")"
     [ "$(state_of "$json")" = draft ] || fail "$battle $version was not published as a draft."
