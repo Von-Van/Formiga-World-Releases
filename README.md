@@ -4,6 +4,10 @@ One place to release Formiga Desktop and its expansions together, in the order t
 other, with two buttons: **Build** and **Ship**. Both are under this repository's Actions tab, as
 "Run workflow".
 
+Looking for Formiga itself? Each app's downloads are on its own repository's Releases page,
+starting with [Formiga Desktop's](https://github.com/Von-Van/Formiga-Desktop/releases). Formiga
+Battle's are on [this repository's](https://github.com/Von-Van/Formiga-World-Releases/releases).
+
 ## What a release goes through
 
 1. **Get each app ready, as usual, in its own repository.**
@@ -57,3 +61,7 @@ in this repository itself, starting Battle's build and keeping its releases, goe
 workflows' own token.
 
 `node --test` and `shellcheck scripts/*.sh` are the checks pull requests run.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
