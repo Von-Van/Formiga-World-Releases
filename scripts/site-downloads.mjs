@@ -3,7 +3,8 @@
 //   node scripts/site-downloads.mjs <config.js> desktop=0.67.2 [hill=0.1.2] [home=0.1.2] [battle=0.67.8]
 //
 // Only each component's `fallback` block changes: its tag and the file names in it, which carry
-// the version. A tag may have a prefix before its v, as Battle's battle-v0.67.8 does. Everything else in the file, the "needs" lines included, is left for a person.
+// the version. A tag may have a prefix before its v, as Battle's battle-v0.67.8 does. Everything
+// else in the file, the "needs" lines included, is left for a person.
 
 import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";

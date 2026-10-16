@@ -12,11 +12,26 @@ on:
         description: "Formiga Battle version, e.g. 0.67.8 (its repository must have the tag v0.67.8)"
         required: true
 
+# Building needs only to read Battle's public code; only publishing writes the draft here.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
+  # The version is used as a tag name below, so it must look like one before anything is built.
+  version:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check the version
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "\"$VERSION\" is not a version like 0.67.8" >&2
+            exit 1
+          fi
+
   macos:
+    needs: version
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
@@ -24,10 +39,10 @@ jobs:
           repository: Von-Van/Formiga-Battle
           ref: v${{ inputs.version }}
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@1.97.1
+      - uses: dtolnay/rust-toolchain@59a558e8c538bf4a23bbffa19e5a278b703f2920 # 1.97.1
         with:
           targets: aarch64-apple-darwin, x86_64-apple-darwin
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - name: Package
         run: bash scripts/package-macos.sh
         env:
@@ -43,6 +58,7 @@ jobs:
             dist/*.sha256
 
   windows:
+    needs: version
     runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
@@ -50,10 +66,10 @@ jobs:
           repository: Von-Van/Formiga-Battle
           ref: v${{ inputs.version }}
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@1.97.1
+      - uses: dtolnay/rust-toolchain@59a558e8c538bf4a23bbffa19e5a278b703f2920 # 1.97.1
         with:
           targets: x86_64-pc-windows-msvc
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - name: Install WiX
         run: |
           dotnet tool install --global wix --version 4.0.5
@@ -73,6 +89,8 @@ jobs:
   publish:
     needs: [macos, windows]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       # Only what the release needs from Battle: its version, and its notes from the changelog.
       - uses: actions/checkout@v4
