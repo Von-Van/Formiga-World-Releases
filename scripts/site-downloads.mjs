@@ -1,9 +1,9 @@
 // Points the website's fallback downloads (assets/js/config.js in Formiga-Site) at new releases.
 //
-//   node scripts/site-downloads.mjs <config.js> desktop=0.67.2 [hill=0.1.2] [home=0.1.2]
+//   node scripts/site-downloads.mjs <config.js> desktop=0.67.2 [hill=0.1.2] [home=0.1.2] [battle=0.67.8]
 //
 // Only each component's `fallback` block changes: its tag and the file names in it, which carry
-// the version. Everything else in the file, the "needs" lines included, is left for a person.
+// the version. A tag may have a prefix before its v, as Battle's battle-v0.67.8 does. Everything else in the file, the "needs" lines included, is left for a person.
 
 import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -20,7 +20,7 @@ export function offer(config, versions) {
     const close = out.indexOf("\n      },", open);
     if (close < 0 || (next >= 0 && close > next)) throw new Error(`"${id}"'s fallback has no end the site's layout leads to expect`);
     const block = out.slice(open, close);
-    const old = block.match(/tag: "v(\d+\.\d+\.\d+)"/);
+    const old = block.match(/tag: "(?:[a-z]+-)?v(\d+\.\d+\.\d+)"/);
     if (!old) throw new Error(`"${id}" names no fallback tag`);
     const escaped = old[1].replaceAll(".", "\\.");
     const fresh = block.replace(new RegExp(`(?<![0-9.])${escaped}(?![0-9])`, "g"), version);
@@ -32,7 +32,7 @@ export function offer(config, versions) {
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const [file, ...pairs] = process.argv.slice(2);
   if (!file || pairs.length === 0) {
-    console.error("usage: node scripts/site-downloads.mjs <config.js> desktop=0.67.2 [hill=0.1.2] [home=0.1.2]");
+    console.error("usage: node scripts/site-downloads.mjs <config.js> desktop=0.67.2 [hill=0.1.2] [home=0.1.2] [battle=0.67.8]");
     process.exit(2);
   }
   const versions = Object.fromEntries(pairs.map((pair) => pair.split("=")));

@@ -1,0 +1,130 @@
+name: Battle
+run-name: Battle ${{ inputs.version }}
+
+# Builds Formiga Battle from its tag and keeps its downloads here, as the hidden draft release
+# battle-vX.Y.Z. Battle's source is private and its repository runs no Actions, so it is built
+# here and only the built apps are published; Build starts this and waits for it. The build's
+# output is kept to error headlines, so no line of Battle's source reaches this public log, and
+# nothing is cached between runs.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Formiga Battle version, e.g. 0.67.8 (its repository must have the tag v0.67.8)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  macos:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: Von-Van/Formiga-Battle
+          ref: v${{ inputs.version }}
+          token: ${{ secrets.RELEASE_TOKEN }}
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@1.97.1
+        with:
+          targets: aarch64-apple-darwin, x86_64-apple-darwin
+      - name: Package
+        run: |
+          if ! bash scripts/package-macos.sh > build.log 2>&1; then
+            grep -E '^(error|warning)' build.log || tail -n 3 build.log
+            exit 1
+          fi
+          grep -E '^(Packaged|Program digest)' build.log
+        env:
+          FORMIGA_BATTLE_BUILD_NUMBER: ${{ github.run_number }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          if-no-files-found: error
+          retention-days: 1
+          path: |
+            dist/*.dmg
+            dist/*.zip
+            dist/*.sha256
+
+  windows:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: Von-Van/Formiga-Battle
+          ref: v${{ inputs.version }}
+          token: ${{ secrets.RELEASE_TOKEN }}
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@1.97.1
+        with:
+          targets: x86_64-pc-windows-msvc
+      - name: Install WiX
+        run: |
+          dotnet tool install --global wix --version 4.0.5
+          Add-Content -Path $env:GITHUB_PATH -Value "$env:USERPROFILE\.dotnet\tools"
+      - name: Package
+        shell: pwsh
+        run: |
+          $packaged = $true
+          try { ./scripts/package-windows.ps1 *> build.log } catch { $packaged = $false; Write-Output $_.Exception.Message }
+          if (-not $packaged) {
+            $headlines = Select-String -Path build.log -Pattern '^(error|warning)'
+            if ($headlines) { $headlines.Line } else { Get-Content build.log -Tail 3 }
+            exit 1
+          }
+          Select-String -Path build.log -Pattern '^Program digest' | ForEach-Object { $_.Line }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          if-no-files-found: error
+          retention-days: 1
+          path: |
+            dist/*.msi
+            dist/*.zip
+            dist/*.sha256
+
+  publish:
+    needs: [macos, windows]
+    runs-on: ubuntu-latest
+    steps:
+      # Only what the release needs from Battle: its version, and its notes from the changelog.
+      - uses: actions/checkout@v4
+        with:
+          repository: Von-Van/Formiga-Battle
+          ref: v${{ inputs.version }}
+          token: ${{ secrets.RELEASE_TOKEN }}
+          persist-credentials: false
+          path: battle
+          sparse-checkout: |
+            Cargo.toml
+            CHANGELOG.md
+          sparse-checkout-cone-mode: false
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Publish the draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          # The tag must be the version the app reports, or Desktop would see another.
+          crate="$(sed -n 's/^version = "\(.*\)"$/\1/p' battle/Cargo.toml | head -n 1)"
+          if [ "$crate" != "$VERSION" ]; then
+            echo "Battle's tag v$VERSION says $crate in its Cargo.toml" >&2
+            exit 1
+          fi
+          # This version's notes are its section of the changelog, "## [X.Y.Z] - date".
+          awk -v want="## [$VERSION]" '
+            /^## / { if (found) exit; if (index($0, want) == 1) { found = 1; next } }
+            found { print }
+          ' battle/CHANGELOG.md > notes.md
+          if [ ! -s notes.md ]; then
+            echo "Battle's CHANGELOG.md has no section for $VERSION" >&2
+            exit 1
+          fi
+          gh release create "battle-v$VERSION" dist/* -R "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --title "Formiga Battle $VERSION" --notes-file notes.md --draft

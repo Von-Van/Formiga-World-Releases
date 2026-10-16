@@ -43,3 +43,30 @@ test("a fallback whose end cannot be found is refused, not rewritten past", () =
   assert.notEqual(reshaped, config);
   assert.throws(() => offer(reshaped, { desktop: "0.67.4" }), /no end/);
 });
+
+// Battle's downloads are kept in Formiga-World-Releases, under tags with a prefix.
+const withBattle = config.replace(/\n  \],\n\};\n$/, `
+    {
+      id: "battle",
+      name: "Formiga Battle",
+      status: "available",
+      repo: "Von-Van/Formiga-World-Releases",
+      fallback: {
+        tag: "battle-v0.67.8",
+        files: {
+          mac: "Formiga-Battle-0.67.8-macOS-universal.dmg",
+          windows: "Formiga-Battle-0.67.8-windows-x64.msi",
+        },
+      },
+    },
+  ],
+};
+`);
+
+test("a tag with a prefix keeps it", () => {
+  assert.notEqual(withBattle, config);
+  const out = offer(withBattle, { desktop: "0.67.9", battle: "0.67.9" });
+  assert.match(out, /tag: "battle-v0\.67\.9",\n {8}files: \{\n {10}mac: "Formiga-Battle-0\.67\.9-macOS-universal\.dmg"/);
+  assert.match(out, /windows: "Formiga-Battle-0\.67\.9-windows-x64\.msi"/);
+  assert.doesNotMatch(out, /0\.67\.8/);
+});
