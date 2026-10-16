@@ -109,5 +109,11 @@ jobs:
             echo "Battle's CHANGELOG.md has no section for $VERSION" >&2
             exit 1
           fi
-          gh release create "battle-v$VERSION" dist/* -R "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
-            --title "Formiga Battle $VERSION" --notes-file notes.md --draft
+          # A draft an earlier try left without all its files is finished with this build's, so
+          # running the build again mends it. A public release is never touched.
+          if [ "$(gh release view "battle-v$VERSION" -R "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft 2>/dev/null)" = true ]; then
+            gh release upload "battle-v$VERSION" dist/* -R "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "battle-v$VERSION" dist/* -R "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+              --title "Formiga Battle $VERSION" --notes-file notes.md --draft
+          fi

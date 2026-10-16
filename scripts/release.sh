@@ -225,6 +225,11 @@ build_battle() {
   local version="$1" desktop_tag="$2" tag="v$1" release="battle-v$1" dir="$work/$battle" subject json state built_on
   json="$(release_json "$releases_repo" "$release")"
   state="$(state_of "$json")"
+  # A draft a build left without all its files is built again, which finishes it.
+  if [ "$state" = draft ] &&
+    [ "$(jq -r '.assets[].name' <<<"$json" | grep -c "^Formiga-Battle-$version-" || true)" -ne "$files_per_release" ]; then
+    state=""
+  fi
   if [ -z "$state" ] && ! tag_exists "$battle" "$tag"; then
     clone "$battle"
     grep -qF "## [$version]" "$dir/CHANGELOG.md" ||
