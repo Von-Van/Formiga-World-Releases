@@ -11,9 +11,7 @@ other, with two buttons: **Build** and **Ship**. Both are under this repository'
      `scripts/set-version.sh` and its notes written (`docs/BUILD.md`, "Cutting a release").
    - Formiga Hill and Formiga Home: merge the new version's `CHANGELOG.md` section. Build moves
      their version and their Desktop tag itself.
-   - Formiga Battle: the same, with its section headed `## [X.Y.Z] - date`. If `RELEASE_TOKEN` can
-     only read Battle, run its `scripts/set-version.sh X.Y.Z vD.D.D` once Desktop's tag exists,
-     merge that, and tag it `vX.Y.Z` yourself; Build then builds that tag.
+   - Formiga Battle: the same, with its section headed `## [X.Y.Z] - date`.
    - The website, if it should say something new: put the words on a branch of Formiga-Site named
      `release/vX.Y.Z`, after Desktop's version. Ship takes it in last.
 2. **Build**, with each app's new version. It tags Desktop, waits for its release to be built,
@@ -31,12 +29,11 @@ names and press it again with the same versions: it picks up where it stopped.
 
 ## Formiga Battle
 
-Battle's source is private and its repository runs no Actions, so it is built here: Build starts
-`battle.yml`, which checks out Battle's tag with `RELEASE_TOKEN`, packages it on macOS and Windows
-with Battle's own `scripts/package-macos.sh` and `scripts/package-windows.ps1`, and keeps the
-downloads as this repository's draft release `battle-vX.Y.Z`. Only the built apps are published;
-the build's log is cut down to error headlines so no line of Battle's source shows in it, and
-nothing is cached between runs. The website offers Battle from here.
+Battle's repository runs no Actions, so it is built here: Build moves Battle's version and Desktop
+tag and tags it as it does Hill's, then starts `battle.yml`, which checks out that tag, packages it
+on macOS and Windows with Battle's own `scripts/package-macos.sh` and `scripts/package-windows.ps1`,
+and keeps the downloads as this repository's draft release `battle-vX.Y.Z`. The website offers
+Battle from here.
 
 Ship also gives the website's friend-match relay (`lib/battle-builds.mjs` in Formiga-Site) the
 SHA-256 of each released Battle program, the app's program on macOS and the `.exe` on Windows, read
@@ -53,7 +50,8 @@ release.
 
 The buttons act through the `RELEASE_TOKEN` secret, a fine-grained access key limited to Formiga
 Desktop, Hill, Home, Farm and the website, with read and write access to their contents and
-Actions, and to Formiga Battle's contents (read only is enough if Battle is tagged by hand).
+Actions, and to Formiga Battle's contents (read and write, so Build can move its version and tag
+it; Battle needs no Actions access).
 GitHub does not let one repository's workflows start another's without one. What the buttons do
 in this repository itself, starting Battle's build and keeping its releases, goes through the
 workflows' own token.

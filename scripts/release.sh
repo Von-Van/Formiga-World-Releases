@@ -8,9 +8,9 @@
 #     docs/BUILD.md describes); a Desktop version that is already tagged is reused, so the
 #     expansions can be released on their own. Each expansion's CHANGELOG.md must already have the
 #     new version's section; this moves its version and Desktop tag, commits that to its main, and
-#     tags it. Formiga Battle goes through the same steps, but its source is private and runs no
-#     Actions, so this repository's battle.yml builds it from its tag and keeps its downloads here,
-#     as the release battle-v<battle>.
+#     tags it. Formiga Battle goes through the same steps, but its repository runs no Actions, so
+#     this repository's battle.yml builds it from its tag and keeps its downloads here, as the
+#     release battle-v<battle>.
 #
 #   scripts/release.sh ship <desktop> [<hill>] [<home>] [<battle>]
 #     Makes those drafts public in the same order, then points the website's downloads at them,
@@ -34,7 +34,7 @@ expansions=(
   "Formiga-Hill Formiga-Hill"
   "Formiga-Home Formiga-Home"
 )
-# Formiga Battle's private repository, and this one, which builds it and keeps its downloads.
+# Formiga Battle's repository, and this one, which builds it and keeps its downloads.
 battle=Formiga-Battle
 releases_repo=Formiga-World-Releases
 # Every release carries a DMG, an MSI and two portable ZIPs, each with its .sha256.
@@ -235,7 +235,7 @@ build_battle() {
       if ! git -C "$dir" diff --quiet; then
         git -C "$dir" commit --quiet -am "$subject"
         git -C "$dir" push --quiet origin HEAD:main ||
-          fail "Could not push to $battle. If GH_TOKEN only reads it, run its scripts/set-version.sh $version $desktop_tag, merge that with its changelog, tag it $tag, then run this again."
+          fail "Could not push to $battle. Give RELEASE_TOKEN write access to its contents, or run its scripts/set-version.sh $version $desktop_tag, merge that, tag it $tag, and run this again."
       fi
       tag_release "$battle" "$tag" "$subject"
     fi
