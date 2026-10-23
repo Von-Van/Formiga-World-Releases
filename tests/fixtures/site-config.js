@@ -1,8 +1,8 @@
 // Release repositories, asset names, fallbacks and availability live here.
 //
 // status:
-//   "available" — downloadable. The page asks GitHub for the newest release (prereleases included)
-//                 and falls back to `fallback` if GitHub cannot be reached.
+//   "available" — downloadable. The page asks GitHub for the newest public release (no drafts or
+//                 prereleases) and falls back to `fallback` if GitHub cannot be reached.
 //   "soon"      — shown with its ticket greyed out: built, but not yet published.
 //   "workshop"  — shown as in development.
 //
@@ -26,10 +26,10 @@ window.FORMIGA = {
         windows: "windows-x64\\.msi$",
       },
       fallback: {
-        tag: "v0.67.3",
+        tag: "v0.67.14",
         files: {
-          mac: "Formiga-0.67.3-macOS-universal.dmg",
-          windows: "Formiga-0.67.3-windows-x64.msi",
+          mac: "Formiga-0.67.14-macOS-universal.dmg",
+          windows: "Formiga-0.67.14-windows-x64.msi",
         },
       },
       size: { mac: "macOS 14 or later · Intel and Apple silicon", windows: "Windows 10 or 11 · 64-bit Intel or AMD" },
@@ -46,10 +46,10 @@ window.FORMIGA = {
         windows: "windows.*\\.msi$",
       },
       fallback: {
-        tag: "v0.67.3",
+        tag: "v0.67.14",
         files: {
-          mac: "Formiga-Hill-0.67.3-macOS-universal.dmg",
-          windows: "Formiga-Hill-0.67.3-windows-x64.msi",
+          mac: "Formiga-Hill-0.67.14-macOS-universal.dmg",
+          windows: "Formiga-Hill-0.67.14-windows-x64.msi",
         },
       },
       size: { mac: "macOS 14 or later · Intel and Apple silicon", windows: "Windows 10 or 11 · 64-bit Intel or AMD" },
@@ -66,10 +66,32 @@ window.FORMIGA = {
         windows: "windows.*\\.msi$",
       },
       fallback: {
-        tag: "v0.67.3",
+        tag: "v0.67.14",
         files: {
-          mac: "Formiga-Home-0.67.3-macOS-universal.dmg",
-          windows: "Formiga-Home-0.67.3-windows-x64.msi",
+          mac: "Formiga-Home-0.67.14-macOS-universal.dmg",
+          windows: "Formiga-Home-0.67.14-windows-x64.msi",
+        },
+      },
+      size: { mac: "macOS 14 or later · Intel and Apple silicon", windows: "Windows 10 or 11 · 64-bit Intel or AMD" },
+    },
+    {
+      id: "battle",
+      name: "Formiga Battle",
+      line: "Friendly three-a-side matches for your companions",
+      status: "available",
+      needs: "Formiga Desktop 0.67.9 or later",
+      // Formiga-World-Releases builds Battle and keeps its downloads,
+      // under tags like battle-v0.67.8.
+      repo: "Von-Van/Formiga-World-Releases",
+      assets: {
+        mac: "^Formiga-Battle-.*macOS.*\\.dmg$",
+        windows: "^Formiga-Battle-.*windows.*\\.msi$",
+      },
+      fallback: {
+        tag: "battle-v0.67.14",
+        files: {
+          mac: "Formiga-Battle-0.67.14-macOS-universal.dmg",
+          windows: "Formiga-Battle-0.67.14-windows-x64.msi",
         },
       },
       size: { mac: "macOS 14 or later · Intel and Apple silicon", windows: "Windows 10 or 11 · 64-bit Intel or AMD" },

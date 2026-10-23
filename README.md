@@ -46,16 +46,18 @@ that version can play each other.
 
 ## How it works
 
-`scripts/release.sh` does both steps; the workflows only run it. Each app's own release workflow
-still does the building: a tag whose message carries the line `Formiga-Release: draft` makes it
+`scripts/release.sh` does both steps; the workflows only run it. Build installs a Rust toolchain
+because each expansion's `scripts/set-version.sh` refreshes its `Cargo.lock` for Desktop's new tag.
+Each app's own release workflow still does the building: a tag whose message carries the line `Formiga-Release: draft` makes it
 publish a draft instead of a public release. `scripts/site-downloads.mjs` changes only the fallback
 downloads in the website's `assets/js/config.js`; the page itself always offers the newest public
 release.
 
 The buttons act through the `RELEASE_TOKEN` secret, a fine-grained access key limited to Formiga
-Desktop, Hill, Home, Farm and the website, with read and write access to their contents and
-Actions, and to Formiga Battle's contents (read and write, so Build can move its version and tag
-it; Battle needs no Actions access).
+Desktop, Hill, Home and the website, with read and write access to their contents and read access
+to Desktop's, Hill's and Home's Actions (Build only watches their runs; the website has none), and
+to Formiga Battle's contents (read and write, so Build can move its version and tag it; Battle
+needs no Actions access). Formiga Farm is not released through here yet.
 GitHub does not let one repository's workflows start another's without one. What the buttons do
 in this repository itself, starting Battle's build and keeping its releases, goes through the
 workflows' own token.
