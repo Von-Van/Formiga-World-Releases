@@ -19,8 +19,8 @@
 #     copies of that version can play each other.
 #
 # Versions are written without the v, e.g. 0.67.2. A blank version skips that expansion. Running
-# either command again picks up where an interrupted run stopped. Needs gh, jq, git, cargo, node and
-# unzip, GH_TOKEN with read and write access to the repositories below, and RELEASES_TOKEN for this
+# either command again picks up where an interrupted run stopped. Needs gh, jq, git, cargo, node,
+# unzip and shasum, GH_TOKEN with read and write access to the repositories below, and RELEASES_TOKEN for this
 # repository itself (its workflows' own token), which starts Battle's build and keeps its releases.
 
 set -euo pipefail
@@ -221,8 +221,18 @@ battle_digests() {
   done
 }
 
+# Battle's $1 tag must be built on Desktop's $2 tag, read from its Cargo.toml: a Battle built on
+# another Desktop could only friend-match a copy opened by that Desktop.
+check_battle_built_on() {
+  local tag="$1" desktop_tag="$2" built_on
+  built_on="$(gh api -H "Accept: application/vnd.github.raw" "repos/$owner/$battle/contents/Cargo.toml?ref=$tag" |
+    sed -n 's/.*Formiga-Desktop", tag = "\(v[^"]*\)".*/\1/p' | sort -u)"
+  [ "$built_on" = "$desktop_tag" ] ||
+    fail "$battle's $tag is built on Desktop's ${built_on:-unknown tag}, not $desktop_tag."
+}
+
 build_battle() {
-  local version="$1" desktop_tag="$2" tag="v$1" release="battle-v$1" dir="$work/$battle" subject json state built_on
+  local version="$1" desktop_tag="$2" tag="v$1" release="battle-v$1" dir="$work/$battle" subject json state
   json="$(release_json "$releases_repo" "$release")"
   state="$(state_of "$json")"
   # A draft a build left without all its files is built again, which finishes it.
@@ -245,10 +255,7 @@ build_battle() {
   fi
   # A tag made by hand, or a release built from one before, must be built on the same Desktop as
   # the rest of the release.
-  built_on="$(gh api -H "Accept: application/vnd.github.raw" "repos/$owner/$battle/contents/Cargo.toml?ref=$tag" |
-    sed -n 's/.*Formiga-Desktop", tag = "\(v[^"]*\)".*/\1/p' | sort -u)"
-  [ "$built_on" = "$desktop_tag" ] ||
-    fail "$battle's $tag is built on Desktop's ${built_on:-unknown tag}, not $desktop_tag."
+  check_battle_built_on "$tag" "$desktop_tag"
   if [ -z "$state" ]; then
     run_battle_build "$version"
     json="$(release_json "$releases_repo" "$release")"
@@ -333,6 +340,8 @@ for entry in "${releases[@]}"; do
   states+=("$state")
   check_files "$repo" "$tag" "$prefix" "$json"
 done
+# A Battle draft left from an earlier release must not go out with this Desktop.
+[ -z "$battle_version" ] || check_battle_built_on "v$battle_version" "v$desktop_version"
 for i in "${!releases[@]}"; do
   read -r repo prefix tag <<<"${releases[$i]}"
   if [ "${states[$i]}" = draft ]; then

@@ -35,6 +35,8 @@ jobs:
     timeout-minutes: 180
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       # The expansions' version scripts refresh Cargo.lock for Desktop's new tag.
       - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
         with:
