@@ -97,27 +97,47 @@ state_of() {
   jq -r 'if .draft then "draft" else "public" end' <<<"$1"
 }
 
+# How many of a release's files, given its JSON, are named for this app and version.
+count_files() {
+  local json="$1" prefix="$2" version="$3"
+  jq -r '.assets[].name' <<<"$json" | grep -c "^$prefix-$version-" || true
+}
+
 # A release, given its JSON, is whole when it has every file, each named for this app and version.
 check_files() {
   local repo="$1" tag="$2" prefix="$3" json="$4" count
-  count="$(jq -r '.assets[].name' <<<"$json" | grep -c "^$prefix-${tag##*v}-" || true)"
+  count="$(count_files "$json" "$prefix" "${tag##*v}")"
   [ "$count" -eq "$files_per_release" ] ||
     fail "$repo $tag has $count of its $files_per_release files. Rerun the failed part of its release run, then run this again."
 }
 
-# Waits for the release run a tag started, then checks the draft it made.
-wait_for_release() {
-  local repo="$1" tag="$2" prefix="$3" run="" tries=0 json
-  say "Waiting for $repo's release run for $tag."
-  while [ -z "$run" ]; do
-    run="$(gh run list -R "$owner/$repo" --workflow release.yml --event push --limit 20 \
-      --json databaseId,headBranch --jq "[.[] | select(.headBranch == \"$tag\")][0].databaseId // empty")"
-    if [ -z "$run" ]; then
+# Puts what a command prints into the variable named, asking again every ten seconds while it prints
+# nothing; after thirty waits it fails with the message instead.
+poll_for() {
+  local var="$1" message="$2" tries=0 found=""
+  shift 2
+  while [ -z "$found" ]; do
+    found="$("$@")"
+    if [ -z "$found" ]; then
       tries=$((tries + 1))
-      [ "$tries" -le 30 ] || fail "$repo's release run for $tag never started."
+      [ "$tries" -le 30 ] || fail "$message"
       sleep 10
     fi
   done
+  printf -v "$var" '%s' "$found"
+}
+
+# The id of the release run a repository's tag started, or nothing while it has not.
+release_run() {
+  gh run list -R "$owner/$1" --workflow release.yml --event push --limit 20 \
+    --json databaseId,headBranch --jq "[.[] | select(.headBranch == \"$2\")][0].databaseId // empty"
+}
+
+# Waits for the release run a tag started, then checks the draft it made.
+wait_for_release() {
+  local repo="$1" tag="$2" prefix="$3" run json
+  say "Waiting for $repo's release run for $tag."
+  poll_for run "$repo's release run for $tag never started." release_run "$repo" "$tag"
   gh run watch "$run" -R "$owner/$repo" --exit-status --interval 30 >/dev/null ||
     fail "$repo's release run for $tag failed: https://github.com/$owner/$repo/actions/runs/$run. Rerun its failed jobs once the cause is fixed, then run this again."
   json="$(release_json "$repo" "$tag")"
@@ -130,6 +150,28 @@ tag_release() {
   local repo="$1" tag="$2" message="$3"
   git -C "$work/$repo" tag -a "$tag" -m "$message" -m "Formiga-Release: draft"
   git -C "$work/$repo" push --quiet origin "refs/tags/$tag"
+}
+
+# Readies an expansion for its tag: clones it, checks its CHANGELOG.md has a line matching the
+# pattern, moves its version and Desktop tag, commits and pushes that to its main when it changed
+# anything, and tags it. A push that fails ends the run with the message given for it, or with
+# git's own words when there is none.
+prepare_expansion() {
+  local repo="$1" version="$2" desktop_tag="$3" pattern="$4" push_failure="${5:-}" tag="v$2" dir="$work/$1" subject
+  clone "$repo"
+  grep -q "$pattern" "$dir/CHANGELOG.md" ||
+    fail "$repo's CHANGELOG.md has no section for $version yet. Merge it first."
+  (cd "$dir" && scripts/set-version.sh "$version" "$desktop_tag" && scripts/set-version.sh --check)
+  subject="Take Desktop's $desktop_tag and release $version"
+  if ! git -C "$dir" diff --quiet; then
+    git -C "$dir" commit --quiet -am "$subject"
+    if [ -n "$push_failure" ]; then
+      git -C "$dir" push --quiet origin HEAD:main || fail "$push_failure"
+    else
+      git -C "$dir" push --quiet origin HEAD:main
+    fi
+  fi
+  tag_release "$repo" "$tag" "$subject"
 }
 
 build_desktop() {
@@ -157,7 +199,7 @@ build_desktop() {
 }
 
 build_expansion() {
-  local repo="$1" prefix="$2" version="$3" desktop_tag="$4" tag="v$3" dir="$work/$1" subject json state
+  local repo="$1" prefix="$2" version="$3" desktop_tag="$4" tag="v$3" json state
   json="$(release_json "$repo" "$tag")"
   state="$(state_of "$json")"
   if [ -n "$state" ]; then
@@ -166,16 +208,7 @@ build_expansion() {
     return
   fi
   if ! tag_exists "$repo" "$tag"; then
-    clone "$repo"
-    grep -q "^## $version " "$dir/CHANGELOG.md" ||
-      fail "$repo's CHANGELOG.md has no section for $version yet. Merge it first."
-    (cd "$dir" && scripts/set-version.sh "$version" "$desktop_tag" && scripts/set-version.sh --check)
-    subject="Take Desktop's $desktop_tag and release $version"
-    if ! git -C "$dir" diff --quiet; then
-      git -C "$dir" commit --quiet -am "$subject"
-      git -C "$dir" push --quiet origin HEAD:main
-    fi
-    tag_release "$repo" "$tag" "$subject"
+    prepare_expansion "$repo" "$version" "$desktop_tag" "^## $version "
   fi
   wait_for_release "$repo" "$tag" "$prefix"
 }
@@ -187,18 +220,19 @@ battle_runs() {
     --jq ".[] | select(.displayTitle == \"Battle $1\" and ($2)) | .databaseId"
 }
 
+# Battle's run for a version that is not among the runs listed in $2, those from before it was
+# started, or nothing while there is none.
+new_battle_run() {
+  battle_runs "$1" true | grep -vxF -e "${2:-none}" | head -n 1 || true
+}
+
 run_battle_build() {
-  local version="$1" run before tries=0
+  local version="$1" run before
   run="$(battle_runs "$version" '.status != "completed"' | head -n 1)"
   if [ -z "$run" ]; then
     before="$(battle_runs "$version" true)"
     gh_on "$releases_repo" workflow run battle.yml -R "$owner/$releases_repo" -f "version=$version"
-    while [ -z "$run" ]; do
-      tries=$((tries + 1))
-      [ "$tries" -le 30 ] || fail "Battle's build for $version never started."
-      sleep 10
-      run="$(battle_runs "$version" true | grep -vxF -e "${before:-none}" | head -n 1 || true)"
-    done
+    poll_for run "Battle's build for $version never started." new_battle_run "$version" "$before"
   fi
   say "Waiting for Battle's build for $version."
   gh_on "$releases_repo" run watch "$run" -R "$owner/$releases_repo" --exit-status --interval 30 >/dev/null ||
@@ -232,26 +266,17 @@ check_battle_built_on() {
 }
 
 build_battle() {
-  local version="$1" desktop_tag="$2" tag="v$1" release="battle-v$1" dir="$work/$battle" subject json state
+  local version="$1" desktop_tag="$2" tag="v$1" release="battle-v$1" json state
   json="$(release_json "$releases_repo" "$release")"
   state="$(state_of "$json")"
   # A draft a build left without all its files is built again, which finishes it.
-  if [ "$state" = draft ] &&
-    [ "$(jq -r '.assets[].name' <<<"$json" | grep -c "^Formiga-Battle-$version-" || true)" -ne "$files_per_release" ]; then
+  if [ "$state" = draft ] && [ "$(count_files "$json" Formiga-Battle "$version")" -ne "$files_per_release" ]; then
     state=""
   fi
   if [ -z "$state" ] && ! tag_exists "$battle" "$tag"; then
-    clone "$battle"
-    grep -qF "## [$version]" "$dir/CHANGELOG.md" ||
-      fail "$battle's CHANGELOG.md has no section for $version yet. Merge it first."
-    (cd "$dir" && scripts/set-version.sh "$version" "$desktop_tag" && scripts/set-version.sh --check)
-    subject="Take Desktop's $desktop_tag and release $version"
-    if ! git -C "$dir" diff --quiet; then
-      git -C "$dir" commit --quiet -am "$subject"
-      git -C "$dir" push --quiet origin HEAD:main ||
-        fail "Could not push to $battle. Give RELEASE_TOKEN write access to its contents, or run its scripts/set-version.sh $version $desktop_tag, merge that, tag it $tag, and run this again."
-    fi
-    tag_release "$battle" "$tag" "$subject"
+    # Battle's CHANGELOG.md heads its sections "## [X.Y.Z] - date"; the dots are matched as themselves.
+    prepare_expansion "$battle" "$version" "$desktop_tag" "## \[$(sed 's/\./\\./g' <<<"$version")\]" \
+      "Could not push to $battle. Give RELEASE_TOKEN write access to its contents, or run its scripts/set-version.sh $version $desktop_tag, merge that, tag it $tag, and run this again."
   fi
   # A tag made by hand, or a release built from one before, must be built on the same Desktop as
   # the rest of the release.
@@ -295,60 +320,68 @@ ship_site() {
   say "$site now offers $names."
 }
 
-command="${1:-}"
-desktop_version="${2:-}"
-if ! [[ "$command" =~ ^(build|ship)$ ]] || [ -z "$desktop_version" ]; then
-  fail "usage: $(basename "$0") build|ship <desktop> [<hill>] [<home>] [<battle>]"
-fi
-versions=("${3:-}" "${4:-}")
-battle_version="${5:-}"
-check_version "$desktop_version"
-for v in "${versions[@]}" "$battle_version"; do [ -z "$v" ] || check_version "$v"; done
-: "${GH_TOKEN:?GH_TOKEN must be set}"
+main() {
+  local command desktop_version versions battle_version v chosen i entry repo prefix version tag json state \
+    releases states
+  command="${1:-}"
+  desktop_version="${2:-}"
+  if ! [[ "$command" =~ ^(build|ship)$ ]] || [ -z "$desktop_version" ]; then
+    fail "usage: $(basename "$0") build|ship <desktop> [<hill>] [<home>] [<battle>]"
+  fi
+  versions=("${3:-}" "${4:-}")
+  battle_version="${5:-}"
+  check_version "$desktop_version"
+  for v in "${versions[@]}" "$battle_version"; do [ -z "$v" ] || check_version "$v"; done
+  : "${GH_TOKEN:?GH_TOKEN must be set}"
 
-# The expansions given a version: repository, download name and version.
-chosen=()
-for i in "${!expansions[@]}"; do
-  [ -z "${versions[$i]}" ] || chosen+=("${expansions[$i]} ${versions[$i]}")
-done
+  # The expansions given a version: repository, download name and version.
+  chosen=()
+  for i in "${!expansions[@]}"; do
+    [ -z "${versions[$i]}" ] || chosen+=("${expansions[$i]} ${versions[$i]}")
+  done
 
-if [ "$command" = build ]; then
-  build_desktop "$desktop_version"
+  if [ "$command" = build ]; then
+    build_desktop "$desktop_version"
+    for entry in "${chosen[@]}"; do
+      read -r repo prefix version <<<"$entry"
+      build_expansion "$repo" "$prefix" "$version" "v$desktop_version"
+    done
+    [ -z "$battle_version" ] || build_battle "$battle_version" "v$desktop_version"
+    say "Every draft is ready to try. Run ship with the same versions to make them public."
+    return
+  fi
+
+  # Ship: check every draft is whole before making any of them public, so a half-built set never
+  # goes out.
+  releases=("$desktop Formiga v$desktop_version")
   for entry in "${chosen[@]}"; do
     read -r repo prefix version <<<"$entry"
-    build_expansion "$repo" "$prefix" "$version" "v$desktop_version"
+    releases+=("$repo $prefix v$version")
   done
-  [ -z "$battle_version" ] || build_battle "$battle_version" "v$desktop_version"
-  say "Every draft is ready to try. Run ship with the same versions to make them public."
-  exit 0
-fi
+  [ -z "$battle_version" ] || releases+=("$releases_repo Formiga-Battle battle-v$battle_version")
+  states=()
+  for entry in "${releases[@]}"; do
+    read -r repo prefix tag <<<"$entry"
+    json="$(release_json "$repo" "$tag")"
+    state="$(state_of "$json")"
+    [ -n "$state" ] || fail "$repo has no $tag release. Run build first."
+    states+=("$state")
+    check_files "$repo" "$tag" "$prefix" "$json"
+  done
+  # A Battle draft left from an earlier release must not go out with this Desktop.
+  [ -z "$battle_version" ] || check_battle_built_on "v$battle_version" "v$desktop_version"
+  for i in "${!releases[@]}"; do
+    read -r repo prefix tag <<<"${releases[$i]}"
+    if [ "${states[$i]}" = draft ]; then
+      gh_on "$repo" release edit "$tag" -R "$owner/$repo" --draft=false --latest >/dev/null
+      say "$repo $tag is public."
+    else
+      say "$repo $tag was already public."
+    fi
+  done
+  ship_site "$desktop_version" "${versions[0]}" "${versions[1]}" "$battle_version"
+}
 
-# Ship: check every draft is whole before making any of them public, so a half-built set never
-# goes out.
-releases=("$desktop Formiga v$desktop_version")
-for entry in "${chosen[@]}"; do
-  read -r repo prefix version <<<"$entry"
-  releases+=("$repo $prefix v$version")
-done
-[ -z "$battle_version" ] || releases+=("$releases_repo Formiga-Battle battle-v$battle_version")
-states=()
-for entry in "${releases[@]}"; do
-  read -r repo prefix tag <<<"$entry"
-  json="$(release_json "$repo" "$tag")"
-  state="$(state_of "$json")"
-  [ -n "$state" ] || fail "$repo has no $tag release. Run build first."
-  states+=("$state")
-  check_files "$repo" "$tag" "$prefix" "$json"
-done
-# A Battle draft left from an earlier release must not go out with this Desktop.
-[ -z "$battle_version" ] || check_battle_built_on "v$battle_version" "v$desktop_version"
-for i in "${!releases[@]}"; do
-  read -r repo prefix tag <<<"${releases[$i]}"
-  if [ "${states[$i]}" = draft ]; then
-    gh_on "$repo" release edit "$tag" -R "$owner/$repo" --draft=false --latest >/dev/null
-    say "$repo $tag is public."
-  else
-    say "$repo $tag was already public."
-  fi
-done
-ship_site "$desktop_version" "${versions[0]}" "${versions[1]}" "$battle_version"
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  main "$@"
+fi
