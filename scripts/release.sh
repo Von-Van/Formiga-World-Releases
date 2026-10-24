@@ -274,8 +274,8 @@ build_battle() {
     state=""
   fi
   if [ -z "$state" ] && ! tag_exists "$battle" "$tag"; then
-    # Battle's CHANGELOG.md heads its sections "## [X.Y.Z] - date"; the dots are matched as themselves.
-    prepare_expansion "$battle" "$version" "$desktop_tag" "## \[$(sed 's/\./\\./g' <<<"$version")\]" \
+    # Battle's CHANGELOG.md heads its sections "## [X.Y.Z] - date"; each dot is matched as itself.
+    prepare_expansion "$battle" "$version" "$desktop_tag" "## \[${version//./[.]}\]" \
       "Could not push to $battle. Give RELEASE_TOKEN write access to its contents, or run its scripts/set-version.sh $version $desktop_tag, merge that, tag it $tag, and run this again."
   fi
   # A tag made by hand, or a release built from one before, must be built on the same Desktop as
