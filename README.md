@@ -62,7 +62,9 @@ GitHub does not let one repository's workflows start another's without one. What
 in this repository itself, starting Battle's build and keeping its releases, goes through the
 workflows' own token.
 
-`node --test` and `shellcheck scripts/*.sh` are the checks pull requests run.
+`node --test` and `shellcheck scripts/*.sh` are the checks pull requests run. The tests source
+`scripts/release.sh` and try its pure checks, the version, the state of a release and the count of
+its files, on a saved copy of a real release's file list; nothing that reaches GitHub is run.
 
 ## License
 
