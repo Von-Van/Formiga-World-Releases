@@ -14,4 +14,5 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: shellcheck scripts/*.sh
+      - run: bash -n scripts/release.sh
       - run: node --test
