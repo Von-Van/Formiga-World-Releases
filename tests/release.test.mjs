@@ -82,3 +82,14 @@ test("sourced, the script does nothing; run, it checks its arguments before anyt
   assert.equal(version.status, 1);
   assert.equal(version.stderr, '"0.68" is not a version like 0.67.2\n');
 });
+
+test("the website is live once Vercel's status on its commit is a success", () => {
+  const status = (...statuses) => JSON.stringify({ state: "pending", statuses });
+  assert.equal(run("deploy_state", status({ context: "Vercel", state: "success" })).stdout, "success\n");
+  assert.equal(run("deploy_state", status({ context: "Vercel", state: "failure" })).stdout, "failure\n");
+  assert.equal(run("deploy_state", status({ context: "Vercel", state: "error" })).stdout, "failure\n");
+  // Still deploying, not started yet, or only another service has spoken: wait.
+  assert.equal(run("deploy_state", status({ context: "Vercel", state: "pending" })).stdout, "\n");
+  assert.equal(run("deploy_state", status()).stdout, "\n");
+  assert.equal(run("deploy_state", status({ context: "Other", state: "success" })).stdout, "\n");
+});
