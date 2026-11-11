@@ -39,10 +39,12 @@ on macOS and Windows with Battle's own `scripts/package-macos.sh` and `scripts/p
 and keeps the downloads as this repository's draft release `battle-vX.Y.Z`. The website offers
 Battle from here.
 
-Ship also gives the website's friend-match relay (`lib/battle-builds.mjs` in Formiga-Site) the
-SHA-256 of each released Battle program, the app's program on macOS and the `.exe` on Windows, read
-from the release's own zips with `scripts/battle-builds.mjs`. From then on only those copies of
-that version can play each other.
+Before it makes anything public, Ship gives the website's friend-match relay
+(`lib/battle-builds.mjs` in Formiga-Site) the SHA-256 of each released Battle program, the app's
+program on macOS and the `.exe` on Windows, read from the draft's own zips with
+`scripts/battle-builds.mjs`, and waits for Vercel to deploy that. Only those copies of that version
+can play each other, and a Mac player and a Windows player can from the moment Battle is public.
+If the deploy fails or takes over five minutes, Ship stops with nothing made public.
 
 ## How it works
 
@@ -57,7 +59,8 @@ The buttons act through the `RELEASE_TOKEN` secret, a fine-grained access key li
 Desktop, Hill, Home and the website, with read and write access to their contents and read access
 to Desktop's, Hill's and Home's Actions (Build only watches their runs; the website has none), and
 to Formiga Battle's contents (read and write, so Build can move its version and tag it; Battle
-needs no Actions access). Formiga Farm is not released through here yet.
+needs no Actions access). Ship also reads the website's commit statuses, to see Vercel's deploy of
+the relay's new digests; without read access to them it gives Vercel three minutes instead. Formiga Farm is not released through here yet.
 GitHub does not let one repository's workflows start another's without one. What the buttons do
 in this repository itself, starting Battle's build and keeping its releases, goes through the
 workflows' own token.

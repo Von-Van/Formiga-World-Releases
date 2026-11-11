@@ -14,9 +14,10 @@
 #
 #   scripts/release.sh ship <desktop> [<hill>] [<home>] [<battle>]
 #     Makes those drafts public in the same order, then points the website's downloads at them,
-#     taking in the website's release/v<desktop> branch first when there is one. For Battle it also
-#     gives the website's friend-match relay the digests of the released programs, so only those
-#     copies of that version can play each other.
+#     taking in the website's release/v<desktop> branch first when there is one. For Battle it
+#     first gives the website's friend-match relay the digests of the released programs, and waits
+#     for the website to deploy that, so only those copies of that version can play each other and
+#     they can from the moment Battle is public.
 #
 # Versions are written without the v, e.g. 0.67.2. A blank version skips that expansion. Running
 # either command again picks up where an interrupted run stopped. Needs gh, jq, git, cargo, node,
@@ -292,11 +293,63 @@ build_battle() {
   battle_digests "$version"
 }
 
+# What Vercel says of its deploy of a website commit, given the commit's combined status JSON:
+# "success", or "failure" for a failed or errored deploy, or nothing while it is still going or has
+# not started.
+deploy_state() {
+  jq -r '[.statuses[]? | select(.context == "Vercel")][0].state // "" |
+    if . == "success" then "success" elif . == "failure" or . == "error" then "failure" else "" end' <<<"$1"
+}
+
+# What Vercel says of its deploy of a website commit, read from GitHub.
+site_deployed() {
+  deploy_state "$(gh_on "$site" api "repos/$owner/$site/commits/$1/status")"
+}
+
+# Waits for Vercel to deploy a commit of the website. Without read access to the website's commit
+# statuses it cannot tell, so it gives Vercel three minutes, which its deploys fit in with room over.
+wait_for_site() {
+  local commit="$1" json state
+  if ! json="$(gh_on "$site" api "repos/$owner/$site/commits/$commit/status" 2>/dev/null)"; then
+    say "Cannot read $site's deploy status (RELEASE_TOKEN needs read access to its commit statuses), so giving Vercel three minutes to deploy ${commit:0:7}."
+    sleep 180
+    return
+  fi
+  say "Waiting for Vercel to deploy $site ${commit:0:7}."
+  poll_for state "Vercel has not deployed $site ${commit:0:7} after five minutes. Look at its deploy on Vercel, then run this again: nothing has been made public yet." site_deployed "$commit"
+  [ "$state" = success ] ||
+    fail "Vercel could not deploy $site ${commit:0:7}. Fix its deploy, then run this again: nothing has been made public yet."
+  say "$site ${commit:0:7} is live."
+}
+
+# Gives the website's friend-match relay the digests of Battle's released programs, and waits for
+# the website to deploy them, before anything is made public. Until the relay knows a version's
+# digests, a downloaded copy can play only a copy built on the same system, so a Mac player and a
+# Windows player could not play each other. Nobody has these copies before Ship makes them public,
+# so listing them first is harmless.
+ship_relay() {
+  local version="$1" dir="$work/$site" digests
+  clone "$site"
+  digests="$(battle_digests "$version")"
+  # shellcheck disable=SC2086 # one digest a word
+  node "$here/battle-builds.mjs" "$dir/lib/battle-builds.mjs" "$version" $digests
+  git -C "$dir" add lib/battle-builds.mjs
+  if git -C "$dir" diff --cached --quiet; then
+    say "$site's relay already knows Battle $version."
+  else
+    git -C "$dir" commit --quiet -m "Let Battle $version's released programs play each other"
+    git -C "$dir" push --quiet origin HEAD:main
+    say "$site's relay now knows Battle $version."
+  fi
+  wait_for_site "$(git -C "$dir" rev-parse HEAD)"
+}
+
 # Points the website's fallback downloads at the new releases. The page itself always asks GitHub
 # for the newest public release; the fallback is what it offers when GitHub cannot be reached.
 ship_site() {
   local desktop_version="$1" hill="$2" home="$3" battle_version="$4" dir="$work/$site" branch="release/v$1" names digests
-  clone "$site"
+  # Already cloned, at main as pushed, when the relay was given Battle's digests first.
+  [ -d "$dir" ] || clone "$site"
   if git -C "$dir" ls-remote --exit-code --heads origin "$branch" >/dev/null; then
     git -C "$dir" fetch --quiet origin "$branch"
     git -C "$dir" merge --quiet --squash "origin/$branch" ||
@@ -370,6 +423,8 @@ main() {
   done
   # A Battle draft left from an earlier release must not go out with this Desktop.
   [ -z "$battle_version" ] || check_battle_built_on "v$battle_version" "v$desktop_version"
+  # The relay learns Battle's digests, live on the website, before Battle is public.
+  [ -z "$battle_version" ] || ship_relay "$battle_version"
   for i in "${!releases[@]}"; do
     read -r repo prefix tag <<<"${releases[$i]}"
     if [ "${states[$i]}" = draft ]; then
